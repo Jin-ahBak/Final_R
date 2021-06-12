@@ -1,0 +1,77 @@
+---
+title: "Untitled"
+output: html_document
+---
+```{r}
+getwd()
+
+setwd('C:/Users/신은주/Desktop/데이터 애널리틱스/R_analytics')
+library('dplyr')
+library('tidyr')
+```
+## 종속변수 만들기- 지역별 부캐관련 검색량
+```{r}
+cha<-read.csv('부캐 연관 검색어(1).csv')
+str(cha)
+cha['부캐관련 검색량']<-cha[,2]+cha[,3]+cha[,4]+cha[,5]+cha[,6]
+cha<-cha[,c(-2,-3,-4,-5,-6)]
+str(cha)
+```
+## 독립변수 불러오기
+- 지역별 대한민국 행복지수(삶의 만족도)
+```{r}
+happy<-read.csv('대한민국행복지도_삶의만족도 (1).csv')
+str(happy)
+#install.packages('mice')
+library(mice)
+m=5
+happy<-complete(mice(happy, m=m, maxit = 20, method = "pmm", seed=100, print=F)) # 결측치 예상값으로 채우기기
+region_happy1<-happy%>%group_by(시도)%>%summarise('삶의 만족도'=sum(삶의.만족도))
+region_happy1<- rename(region_happy1, "지역" = "시도")
+```
+- 지역별 여가활용 만족도
+```{r}
+play<-read.csv('대한민국행복지도_여가.csv')
+str(play)
+m=5
+play<-complete(mice(play, m=m, maxit = 20, method = "pmm", seed=100, print=F)) # 결측치 두개 예측치로 채우기
+region_play<-play%>%group_by(지역)%>%summarise('여가활용 만족도'=sum(여가활용.만족도.b.))
+```
+-지역별 자살률,1인가구,가족관계 만족도
+```{r}
+social<-read.csv('대한민국행복지도_관계 및 사회참여.csv')
+str(social)
+m=5
+social<-complete(mice(social, m=m, maxit = 20, method = "pmm", seed=100, print=F))
+social=social[,-2]
+region_social<-social%>%group_by(지역)%>%summarise_each(funs(sum))
+str(region_social)
+```
+- 학업성취도 비율 및 인구천명당 사설학원수
+```{r}
+education<-read.csv('대한민국행복지도_교육 (1).csv')
+m=5
+education<-complete(mice(education, m=m, maxit = 20, method = "pmm", seed=100, print=F))
+education=education[,-2]
+region_education<-education%>%group_by(지역)%>%summarise_each(funs(sum))
+str(region_education)
+```
+### 데이터 프레임 합치기
+```{r}
+#install.packages("plyr")
+
+library(plyr)
+df= join_all(list(cha,region_education, region_play,region_social,region_happy1), by="지역", type="inner")
+```
+
+### 분류모델을 위한 종속변수 변환
+```{r}
+summary(df) 
+```
+- 부캐관련 검색량 평균 57.88
+```{r}
+df$log_cha[df$`부캐관련 검색량`<=36]<-0
+df$log_cha[df$`부캐관련 검색량`>=36]<-1
+
+```
+

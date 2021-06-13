@@ -5,7 +5,7 @@ output: html_document
 ```{r}
 getwd()
 
-setwd('C:/Users/신은주/Desktop/데이터 애널리틱스/R_analytics')
+#setwd('C:/Users/신은주/Desktop/데이터 애널리틱스/R_analytics')
 library('dplyr')
 library('tidyr')
 ```
@@ -13,7 +13,7 @@ library('tidyr')
 ```{r}
 cha<-read.csv('부캐 연관 검색어(1).csv')
 str(cha)
-cha['부캐관련 검색량']<-cha[,2]+cha[,3]+cha[,4]+cha[,5]+cha[,6]
+cha['부캐관련검색량']<-cha[,2]+cha[,3]+cha[,4]+cha[,5]+cha[,6]
 cha<-cha[,c(-2,-3,-4,-5,-6)]
 str(cha)
 ```
@@ -64,14 +64,84 @@ library(plyr)
 df= join_all(list(cha,region_education, region_play,region_social,region_happy1), by="지역", type="inner")
 ```
 
+
+
+
+# 김씨 분량 시작!
+```{r}
+#1.지역 제외 
+rdf <- df[,-1]
+str(rdf)
+#변수 간 상관관계 산점행렬도로 나타내기 
+library(psych)
+pairs.panels(rdf)
+```
+
+```{r}
+#2.회귀분석 
+reg1 <- lm(부캐관련검색량 ~.,data=rdf)
+summary(reg1)
+par(mflow=c(2,2))
+plot(reg1)
+library(sjPlot)
+plot_model(reg1,type="diag")
+library(lmtest)
+dwtest(reg1)
+
+#후진제거법 
+reg_back <- step(reg1, direction = 'backward', trace=T)
+summary(reg_back)
+
+#전진 선택법 
+reg_for <- lm(부캐관련검색량~1, rdf)
+summary(reg_for)
+reg_for <- step(reg_for, direction = 'forward', scope=(부캐관련검색량 ~학업성취도 + 인구.천명당.사설학원수 + `여가활용 만족도` + 
+    인구.십만명당.자살률.a. + X1인가구.독거노인.제외..비율.a. + 
+    가족관계.만족도.b. + `삶의 만족도`),trace=T)
+
+
+#선택 제거법
+reg_c <- step(reg1,direction = "both")
+summary(reg_c)
+
+
+#check
+#3. 독립변수들의 상대적 영향력 비교 
+#표준화 계수를 통한 독립변수들 영향력 비교 
+library(QuantPsyc)
+lm.beta(reg_for)
+
+```
+#4.
+
+```{r}
+
+#잔차의 정규성 검정
+shapiro.test(reg_for$residuals)
+#잔차 정규성 만족 - pvalue가 0.05보다 크므로 
+
+#.다중회귀 분석 결과표
+#library(sjPlot)
+#tab_model(model1,show.se=T,show.ci=F,show.stat=T, auto.label =F)
+
+#.다중공선성 진단 
+library(car)
+vif(reg_for)
+
+```
+
+
+
+
+
 ### 분류모델을 위한 종속변수 변환
 ```{r}
 summary(df) 
 ```
 - 부캐관련 검색량 평균 57.88
 ```{r}
-df$log_cha[df$`부캐관련 검색량`<=36]<-0
-df$log_cha[df$`부캐관련 검색량`>=36]<-1
+df$log_cha[df$`부캐관련검색량`<=36]<-0
+df$log_cha[df$`부캐관련검색량`>=36]<-1
 
 ```
 

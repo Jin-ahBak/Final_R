@@ -1,0 +1,799 @@
+---
+title: "Untitled"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+  chunk_output_type: console
+---
+
+### 데이터 수집 및 정제
+
+```{r}
+Start_up_data<-read.csv("Startup_Data.csv")
+for (i in 1:38) {
+  Start_up_data[[i]] <- gsub("No Info", NA, Start_up_data[[i]])
+}
+```
+
+### 기업정보 데이터 프레임
+
+```{r}
+attach(Start_up_data)
+company_info<-data.frame(Start_up_data[,c("Company_Name","Dependent.Company.Status","Age.of.company.in.years","Internet.Activity.Score","Industry.of.company","Country.of.company","Team.size.all.employees","Years.of.education","Skills.score","Team.Composition.score","Renown.score","google.page.rank.of.company.website")])
+for (i in c(3,4,7,8,9,11,12)){
+  company_info[[i]] <- as.numeric(company_info[[i]])
+}
+for (i in c(1,2,5,6,10)) {
+  company_info[[i]] <- gsub("0", NA, company_info[[i]])
+}
+```
+
+```{r}
+######################로지스틱회귀 - 기업정보##############################
+
+#데이터 결측치 채우기  
+library(mice)
+m = 5
+company_info<-complete(mice(company_info, m=m, maxit = 20, method = "pmm", seed=100, print=F))  
+colSums(is.na(company_info))  
+str(company_info) 
+
+# 데이터 열 정제하기  
+company_info <-company_info[ , -which(names(company_info) %in% c("Company_Name","Industry.of.company", "Country.of.company"))]
+str(company_info)
+
+# 종속변수 high & low 이진변수 바꾸기  
+avg_rank <- median(company_info$google.page.rank.of.company.website, na.rm=T)
+company_info$google.page.rank.of.company.website<- ifelse(company_info$google.page.rank.of.company.website >= avg_rank, 'high', 'low')  
+# chara 자료형 factor로 바꾸기  
+company_info[sapply(company_info, is.character)] <- lapply(company_info[sapply(company_info, is.character)], as.factor)
+
+
+str(company_info)  
+
+
+```
+
+### 로지스틱 회귀분석
+
+종속변수: google.page.rank.of.company.website의 중요도의 중앙값 이상을
+'high', 미만을 'low'라는 이진변수
+
+```{r}
+# 모든 독립변수에 대한 회귀모델
+logreg_com <- glm(google.page.rank.of.company.website ~ ., data= company_info, family = binomial)   
+summary(logreg_com)    
+
+#유의한 변수 3개에 대한 회귀모델
+logreg_com2 <- glm(google.page.rank.of.company.website ~ Age.of.company.in.years + Internet.Activity.Score + Skills.score , data= company_info, family= binomial )    
+
+#후진선택제거법으로 앞서 나온 3개변수 이외 새로운 변수추가
+backward = step(logreg_com)   
+formula(backward)  
+summary(backward)  
+rm(logreg_com3)
+#후진선택제거법 적용한 회귀모델  
+logreg_com3 <- glm(google.page.rank.of.company.website ~ Age.of.company.in.years + Internet.Activity.Score + Skills.score + Dependent.Company.Status , data= company_info, family= binomial)  
+
+library(car)
+vif(logreg_com)  #다중공선성 확인
+
+```
+
+\< 분석결과\>\
+독립변수 중 Age.of.company.in.years, Internet.Activity.Score,
+Skills.score 변수는\
+종속변수인 Google page rank에 유의미한 영향을 미치는것으로
+분석되었습니다.\
+Null모델의 오차는 654.33, residual 모델의 오차는 575.66으로 만든 모델이
+오차를 줄였음을 알 수 있습니다.
+
+GVIF(generalized variance inflation factor), df(number of coefficients
+in the subset)으로 GVIF\^(1/(2\*df)) \> 2인 독립변인은 다중공선성이
+있다고 간주합니다. 그러나 모든 독립변수는 2 미만의 값으로 다중공선성은
+존재하지 않습니다.
+
+```{r}
+logregNull <- glm(google.page.rank.of.company.website ~ 1, family= binomial, data= company_info)  
+summary(logregNull)  
+anova(logregNull, logreg_com, test = 'Chisq')
+anova(logregNull, logreg_com2, test = 'Chisq')  
+anova(logregNull, logreg_com3, test = 'Chisq')
+```
+
+anova 테스트를 한 결과 세 모델 모두 로지스틱 회귀 Chi-값 모두 P값이
+유의수준 0.05보다\
+낮은 수준으로 전체적인 모델에 유의성이 있다는 결과가 분석되었습니다.
+
+```{r}
+round(coef(logreg_com),3)  
+round(exp(coef(logreg_com)) ,3) # 독립변수가 1unit 증가할 떄 종속변수의 log-odds의 증가,감소값
+confint(logreg_com)  
+round(exp(confint(logreg_com)),3)
+```
+
+Tem.Composition.score의 정보가 없는 데이터를 제외하고 분석한 결과\
+먼저 Team.Composition score가 낮을 떄와 education의 year의 변수와
+종속변수는 음의관계로 증가하고\
+나머지 변수는 양의 관계를 나타냈습니다.
+
+exp(coef(logreg_com))를 살펴보면 독립변수 1unit이 증가할 떄,\
+Dependent.Company.StatusSuccess(성공의 유무)는 1.5배 증가,
+Age.of.company.in.years(창사)에 따라 1.13배 증가,
+Team.Composition.scoreMedium(팀 구성 능력 중간)는 1.07배 증가하는 것을
+알 수 있습니다.
+
+반면, 가장 적은 증감을 보이는 변수는 Years.of.education(교육년도)로
+0.94배 만큼 감소한다는 것을 알 수 있습니다.
+
+### 로지스틱 회귀모델의 성능평가
+
+```{r}
+
+library(Epi)  
+
+# 모든 독립변수에 대한 회귀모델 성능평가
+graph_com1 <- ROC(form = google.page.rank.of.company.website ~. , data= company_info)
+
+#유의한 변수 3개에 대한 회귀모델 성능평가
+graph_com2 <- ROC(form = google.page.rank.of.company.website ~ Age.of.company.in.years + Internet.Activity.Score + Skills.score , data= company_info)    
+
+#후진선택제거법을 적용한 회귀모델 성능평가 
+graph_com3 <- ROC(form = google.page.rank.of.company.website ~ Age.of.company.in.years + Internet.Activity.Score + Skills.score + Dependent.Company.Status , data= company_info)  
+
+lr.eta(probability) # 기준점이 되는 확률값
+head(graph_com1$res)  
+tail(graph_com1$res)  
+
+graph_com$res[round(graph_com1$res$lr.eta,3)== 0.556 ,] # sens 와 spec값 확인  
+
+graph_com1$AUC #ROC커브 아래 면적
+graph_com1$lr #로지스틱 회귀분석 결과  
+```
+
++---------------+---------------+---------------+---------------+
+| Company_info  | AUC( 회귀모델 | SENS (민감도) | SPEC (        |
+|               | 성능평가지표) |               | 특이도)       |
++===============+===============+===============+===============+
+| graph_com1    | 0.725         | 55.9%         | 87.3%         |
+|               |               |               |               |
+| 전체모델의    |               |               |               |
+| 유의성 있음   |               |               |               |
+|               |               |               |               |
+| 모든 독립변수 |               |               |               |
++---------------+---------------+---------------+---------------+
+| graph_com2    | 0.714         | 58.1%         | 85.6%         |
+|               |               |               |               |
+| 전체모델의    |               |               |               |
+| 유의성 있음   |               |               |               |
+|               |               |               |               |
+| Age.of.co m   |               |               |               |
+| pany.in.years |               |               |               |
+| +Internet. A  |               |               |               |
+| ctivity.Score |               |               |               |
+| +             |               |               |               |
+| Skills.score  |               |               |               |
++---------------+---------------+---------------+---------------+
+| graph_com3    | 0.715         | 55.9%         | 86.9%         |
+|               |               |               |               |
+| 전체모델의    |               |               |               |
+| 유의성 있음   |               |               |               |
+|               |               |               |               |
+| Age.of.co m   |               |               |               |
+| pany.in.years |               |               |               |
+| + Internet. A |               |               |               |
+| ctivity.Score |               |               |               |
+| +             |               |               |               |
+| Skills.score  |               |               |               |
+| + Dependent.  |               |               |               |
+| C             |               |               |               |
+| ompany.Status |               |               |               |
++---------------+---------------+---------------+---------------+
+
+Ir.eta = 0.530를 기준으로 분리했을 떄 분류가 최대로 좋아집니다. 앞서
+선택한 3개의 변수로 sensitivity는 58.1%, specificity 는 85.6%, AUC는
+0.714로 0.8 미만의 값으로 모델성능이 엄청 뛰어나다고 할 수 없었습니다.\
+그래서 p-value값이 0.05보다 높은 수준이었지만 후진선택제거법을 통해
+선택된 Dependent.Company.Status 변수를 추가해 주어 모델의
+성능(graph_com2)을 높여주려고 했지만,다시 모델 성능지표를 분석한 결과,
+3개의 독립변수 모델성능과 차이가 없었습니다.
+
+이는 독립변수와 종속변수의 계수를 보았을 때 2배 이상의 엄청난 유의한
+영향력을 지닌 독립변수가 존재하지 않기에 나온 결과임을 추측해 볼 수
+있습니다다.
+
+```{r}
+#로지스틱 회귀분석을 통해 예측치와 실측치 비교 
+
+data <-logreg_com$data   #관찰되는 독립, 종속변수값
+y <-logreg_com$y     #관찰된 종속변수 실측치
+lp <- logreg_com$linear.predictors  #z값
+head(cbind(ifelse(1/(1+exp(-lp)) > 0.530, 1,0), y)) #spec 값 
+table(ifelse(1/(1+exp(-lp)) > 0.530 , 1 ,0), y) # sens 값
+```
+
+예측치와 실측치가 일치할 확률은 민감도(sensitivity) 의 확률: 99/ 99+137
+= 55.9 %이고,\
+불일치할 확률은 특이도 (sepcificity) 의 확률: 193/193+43 = 87.3% 이다.
+
+### 비즈니스 데이터 프레임
+
+```{r}
+bussiness_info<-data.frame(Start_up_data[,c("Company_Name","Dependent.Company.Status","Product.or.service.company.","Online.or.offline.venture...physical.location.based.business.or.online.venture.","B2C.or.B2B.venture.","Predictive.Analytics.business","Big.Data.Business","Machine.Learning.based.business","Pricing.Strategy","Focus.functions.of.company","google.page.rank.of.company.website")])
+str(bussiness_info)
+bussiness_info[[11]] <- as.numeric(bussiness_info[[11]])
+bussiness_info[[10]] <- gsub("0", NA, bussiness_info[[10]])
+bussiness_info[[10]] <- gsub("N", NA, bussiness_info[[10]])
+bussiness_info[[10]] <- gsub("'\'", NA, bussiness_info[[10]])
+
+
+```
+
+```{r}
+############################로지스틱회귀 - 비즈니스 ##############################
+colSums(is.na(bussiness_info))  
+
+
+#데이터 결측치 채우기  
+library(mice)
+m = 5
+str(bussiness_info)
+bussiness_info<-complete(mice(bussiness_info, m=m, maxit = 20, method = "pmm", seed=100, print=F))  
+colSums(is.na(bussiness_info))  
+
+
+# 데이터 열 정제하기  
+bussiness_info <-bussiness_info[ , -which(names(bussiness_info) %in% c("Company_Name","Industry.of.company", "Dependent.Company.Status", "Focus.functions.of.company"))]
+bussiness_info$B2C.or.B2B.venture. <- gsub('No Info', NA,bussiness_info$B2C.or.B2B.venture. )
+bussiness_info$`Online or offline` <- gsub('No Info', NA,bussiness_info$`Online or offline` )  
+
+# 종속변수 high & low 이진변수 바꾸기  
+avg_rank <- median(bussiness_info$google.page.rank.of.company.website, na.rm=T)
+bussiness_info$google.page.rank.of.company.website<- ifelse(bussiness_info$google.page.rank.of.company.website >= avg_rank, 'high', 'low')  
+
+# chara 자료형 factor로 바꾸기  
+bussiness_info[sapply(bussiness_info, is.character)] <- lapply(bussiness_info[sapply(bussiness_info, is.character)], as.factor)
+
+#결측치 명목형 자료 처리하기  
+bussiness_info<- bussiness_info[complete.cases(bussiness_info),]
+colSums(is.na(bussiness_info))
+
+names(bussiness_info)[2]<- "Online or offline"
+str(bussiness_info)  
+
+```
+
+### 로지스틱 회귀분석
+
+종속변수: google.page.rank.of.company.website의 중요도의 중앙값 이상을
+'high', 미만을 'low'라는 이진변수
+
+```{r}
+# 전체 독립변수를 적용한 로지스틱 회귀모델
+logreg_bus <- glm(google.page.rank.of.company.website ~ ., data= bussiness_info, family = binomial)   
+summary(logreg_bus)  
+
+#유의성은 없지만  p-value값이 0.05에 가까운 변수 적용한 회귀모델
+logreg_bus2 <- glm(google.page.rank.of.company.website ~ B2C.or.B2B.venture.+ Machine.Learning.based.business, data= bussiness_info, family = binomial)   
+summary(logreg_bus2)
+
+```
+
+\< 분석결과\> 독립변수 중\
+모든 독립변수의 p-value값은 0.05보다 높은 수준으로 유의한 변수는
+없었습니다.\
+전체 독립변수를 적용한 logreg_bus를 보면 Null모델의 오차는 590.48,
+residual 모델의 오차는 573.34으로 만든 모델이 오차를 줄였음을 알 수
+있습니다.
+
+```{r}
+logregNull_bus <- glm(google.page.rank.of.company.website ~ 1, family= binomial, data= bussiness_info)  
+summary(logregNull_bus)  
+
+#NULL모델과 logreg_bus모델 평가 
+anova(logregNull_bus, logreg_bus, test = 'Chisq')  
+
+#NULL모델과 logreg_bus2모델 평가 
+anova(logregNull_bus, logreg_bus2, test = 'Chisq')
+```
+
+두 회귀모델 모두 p-value값이 0.05보다 높은수준으로 전체적인 통계적
+유의성은\
+없다고 분석되었습니다.
+
+### 데이터 및 IT기술 데이터 프레임
+
+```{r}
+data_info<-data.frame(Start_up_data[,c("Company_Name","Dependent.Company.Status","Focus.on.private.or.public.data.","Focus.on.consumer.data.","Focus.on.structured.or.unstructured.data","Cloud.or.platform.based.serive.product.","Capital.intensive.business.e.g..e.commerce..Engineering.products.and.operations.can.also.cause.a.business.to.be.capital.intensive","google.page.rank.of.company.website")])
+data_info[[8]] <- as.numeric(data_info[[8]])
+for (i in 1:7) {
+  data_info[[i]] <- gsub("0", NA, data_info[[i]])
+}
+  
+data_info[[5]] <- gsub("no", NA, data_info[[5]])
+data_info[[6]] <- gsub("none", NA, data_info[[6]])
+data_info[[6]] <- gsub("cloud", 'Cloud', data_info[[6]])
+str(data_info)
+
+
+```
+
+```{r}
+#####################로지스틱회귀- 데이터 및 IT기술######################
+colSums(is.na(data_info))  
+
+
+#데이터 결측치 채우기  
+library(mice)
+m = 5
+data_info<-complete(mice(data_info, m=m, maxit = 20, method = "pmm", seed=100, print=F))  
+colSums(is.na(data_info))  
+
+
+# 데이터 열 정제하기  
+data_info <-data_info[ , -which(names(data_info) %in% c("Company_Name","Dependent.Company.Status"))]
+
+
+#특정 열 데이터 정제
+data_info$Cloud.or.platform.based.serive.product. <- gsub("No Info", NA, data_info$Cloud.or.platform.based.serive.product.)  
+data_info$Focus.on.structured.or.unstructured.data<- gsub("not applicable", NA,data_info$Focus.on.structured.or.unstructured.data)  
+
+
+
+
+# 종속변수 high & low 이진변수 바꾸기  
+avg_rank <- median(data_info$google.page.rank.of.company.website, na.rm=T)
+data_info$google.page.rank.of.company.website<- ifelse(data_info$google.page.rank.of.company.website >= avg_rank, 'high', 'low') 
+
+# chara 자료형 factor로 바꾸기  
+data_info[sapply(data_info, is.character)] <- lapply(data_info[sapply(data_info, is.character)], as.factor)
+
+#결측치 명목형 자료 처리하기  
+data_info<- data_info[complete.cases(data_info),]
+
+
+names(data_info)[5]<- "Capital.intensive.business"
+ 
+dim(data_info)
+
+```
+
+### 로지스틱 회귀분석
+
+종속변수: google.page.rank.of.company.website의 중요도의 중앙값 이상을
+'high', 미만을 'low'라는 이진변수
+
+```{r}
+# 모든 독립변수에 대한 회귀모델
+logreg_data1 <- glm(google.page.rank.of.company.website ~ ., data= data_info, family = binomial)
+summary(logreg_data1)    
+
+#유의한 p-value값의 변수를 독립변수로 적용한 회귀모델
+logreg_data2 <- glm(google.page.rank.of.company.website ~Cloud.or.platform.based.serive.product. , data= data_info, family = binomial)
+summary(logreg_data2)    
+
+#후진선택제거법
+backward = step(logreg_data1)   
+formula(backward)  
+summary(backward)   
+
+#후진선택제거법을 적용한 회귀모델 (Capital.intensive.business 변수추가)
+logreg_data3 <- glm(google.page.rank.of.company.website ~ Cloud.or.platform.based.serive.product. + Capital.intensive.business, data= data_info, family = binomial) 
+summary(logreg_data3)  
+```
+
+\< 분석결과\> 독립변수 중\
+Cloud.or.platform.based.serive.product.Cloud
+Cloud.or.platform.based.serive.product.Platform 변수는 종속변수인 Google
+page ranking에 유의미한 영향을 미치는 것으로 분석되었습니다. Null모델의
+오차는 458.79, residual 모델의 오차는 444.46으로 만든 모델이 오차를
+줄였음을 알 수 있습니다.
+
+```{r}
+logregNull_data <- glm(google.page.rank.of.company.website ~ 1, family= binomial, data= data_info)  
+summary(logregNull_data)    
+
+ 
+#NULL모델과 logreg_data모델 평가
+anova(logregNull_data, logreg_data1, test = 'Chisq')  
+
+#NULL모델과 logreg_data2모델 평가
+anova(logregNull_data, logreg_data2, test = 'Chisq')  
+
+#NULL모델과 logreg_bus2모델 평가 
+anova(logregNull_data, logreg_data3, test = 'Chisq')  
+
+```
+
+anova 테스트를 한 결과 logreg_data1 의 전체적인 모델성능은 유의성이
+없다는 결과가 분석되었으며, logreg_data2, logreg_data3 모델 성능은
+유의수준 0.05보다 낮은 수준으로 전체적인 모델에\
+유의성이 있다는 결과가 분석되었습니다.
+
+```{r}
+round(coef(logreg_data),3)  
+round(exp(coef(logreg_data)) ,3) # 독립변수가 1unit 증가할 떄 종속변수의 log-odds의 증가,감소값
+
+```
+
+exp(coef(logreg_com))를 살펴보면 독립변수 1unit이 증가할 떄,\
+Cloud.or.platform.based.serive.product가 Cloud일 때 3배 증가하고,
+Cloud.or.platform.based.serive.product가 Platform일 때 따라 2.2배
+증가합니다.\
+반면 Focus.on.structured.or.unstructured.data가 Unstructured data일 떄
+0.95배 감소함으로써\
+구조화 되지 않은 데이터에 초점을 맞춘 company는 종속변수인 google rank에
+가장 큰 음의관계에 영향을 미치는 것을알 수 있습니다.
+
+-   다음은 전체적인 모델의 유의성은 없지만 정확한 회귀모델의 성능을
+    평가해보았습니다.
+
+```{r}
+#로지스틱 회귀모델의 성능평가  
+library(Epi)  
+
+# 모든 독립변수에 대한 회귀모델
+graph_data <- ROC(form = google.page.rank.of.company.website ~. , data= data_info)
+
+#유의한 p-value값의 변수를 독립변수로 적용한 회귀모델
+graph_data2 <- ROC(form = google.page.rank.of.company.website ~ Cloud.or.platform.based.serive.product. , data= data_info)    
+
+ 
+#후진선택제거법을 적용한 회귀모델  
+graph_data3 <- ROC(form = google.page.rank.of.company.website ~ Cloud.or.platform.based.serive.product. + Capital.intensive.business, data= data_info)  
+
+```
+
++---------------+---------------+---------------+---------------+
+| Data_info     | AUC( 회귀모델 | SENS (민감도) | SPEC (        |
+|               | 성능평가지표) |               | 특이도)       |
++===============+===============+===============+===============+
+| graph_data1   | | 0.607       | | 77.4%       | | 39.5%       |
+|               |               |               |               |
+| 전체모델의    |               |               |               |
+| 유의성 없음   |               |               |               |
+|               |               |               |               |
+| 모든 독립변수 |               |               |               |
++---------------+---------------+---------------+---------------+
+| graph_data2   | | 0.563       | | 85.8%       | | 24.9%       |
+|               |               |               |               |
+| 전체모델의    |               |               |               |
+| 유의성 있음   |               |               |               |
+|               |               |               |               |
+| Cloud.or.pl a |               |               |               |
+| tform.based.s |               |               |               |
+| e             |               |               |               |
+| rive.product. |               |               |               |
++---------------+---------------+---------------+---------------+
+| graph_data3   | | 0.582       | | 85.2%       | | 28.2%       |
+|               |               |               |               |
+| 전체모델의    |               |               |               |
+| 유의성 있음   |               |               |               |
+|               |               |               |               |
+| Cloud.or.pl a |               |               |               |
+| tform.based.s |               |               |               |
+| e             |               |               |               |
+| rive.product. |               |               |               |
+| +             |               |               |               |
+| Capital.inte  |               |               |               |
+| n             |               |               |               |
+| sive.business |               |               |               |
++---------------+---------------+---------------+---------------+
+
+3개의 회귀모델을 비교분석한 결과 모든 독립변수를 적용한 graph_data1\
+회귀모델의 AUC(모델 성능 평가지표)값이 가장 좋은 모델이었습니다. 그러나
+이 모델의 AUC는0.607로 0.8 미만의 값으로 모델성능이 엄청 뛰어나다고 할
+수 없었습니다.\
+
+그리고 p-value값이 0.05보다 높은 수준이었지만 후진선택제거법을 통해
+선택된 변수 Capital.intensive.business를 추가해 회귀 모델의
+성능(graph_data3)을 높여주려고 했지만 오히려 더 낮은 성능을 보였습니다.
+
+### 투자정보 및 외적요인 데이터 프레임
+
+```{r}
+invest_info<-data.frame(Start_up_data[,c("Company_Name","Dependent.Company.Status","Number.of.Investors.in.Angel.and.or.VC","Number.of.of.advisors","Number.of.of.repeat.investors","google.page.rank.of.company.website")])
+for (i in c(3,4,5,6)){
+ invest_info[[i]] <- as.numeric(invest_info[[i]])
+}
+str(invest_info)  
+```
+
+```{r}
+#####################로지스틱회귀- 투자 정보 및 외적요인######################
+colSums(is.na(invest_info))  
+
+
+#데이터 결측치 채우기  
+library(mice)
+m = 5
+str(invest_info)
+invest_info<-complete(mice(invest_info, m=m, maxit = 20, method = "pmm", seed=100, print=F))  
+colSums(is.na(invest_info))  
+
+
+# 데이터 열 정제하기  
+invest_info <-invest_info[ , -which(names(invest_info) %in% c("Company_Name","Dependent.Company.Status"))]
+str(invest_info)
+
+# 종속변수 high & low 이진변수 바꾸기  
+avg_rank <- median(invest_info$google.page.rank.of.company.website, na.rm=T)
+invest_info$google.page.rank.of.company.website<- ifelse(invest_info$google.page.rank.of.company.website >= avg_rank, 'high', 'low')  
+# chara 자료형 factor로 바꾸기  
+invest_info[sapply(invest_info, is.character)] <- lapply(invest_info[sapply(invest_info, is.character)], as.factor)
+
+
+str(invest_info)  
+
+
+```
+
+### 로지스틱 회귀분석
+
+종속변수: google.page.rank.of.company.website의 중요도의 중앙값 이상을
+'high', 미만을 'low'라는 이진변수
+
+```{r}
+# 모든 독립변수 적용 회귀모델  
+logreg_inv <- glm(google.page.rank.of.company.website ~ ., data= invest_info, family = binomial)  
+summary(logreg_inv)  
+
+
+#후진선택제거법
+backward = step(logreg_inv)   
+formula(backward)  
+summary(backward)  
+
+#후진선택제거법으로 선택된 독립변수 적용 회귀모델  
+logreg_inv2 <- glm(google.page.rank.of.company.website ~ Number.of.of.repeat.investors, data= invest_info, family = binomial)  
+summary(logreg_inv2)
+```
+
+\< 분석결과\> 독립변수 중 Number.of.of.repeat.investors 변수는
+종속변수인 Google page rank에 유의미한 영향을 미치는 것으로
+분석되었습니다. Null모델의 오차는 654.32, residual 모델의 오차는
+648.625로 만든 모델이 오차를 줄였음을 알 수 있습니다.
+
+후진선택제거법으로 선택된 독립변수(Number.of.of.repeat.investors)만을
+적용한 회귀모델도\
+만들었습니다.
+
+```{r}
+logregNull_inv <- glm(google.page.rank.of.company.website ~ 1, family= binomial, data= invest_info)  
+summary(logregNull_inv)  
+
+# Null 모델과 logreg_inv 모델 유의성 비교   
+anova(logregNull_inv, logreg_inv, test = 'Chisq')   
+
+# Null 모델과 logreg_inv2 모델 유의성 비교  
+anova(logregNull_inv, logreg_inv2, test = 'Chisq')
+```
+
+anova 테스트를 한 결과 모든 독립변수를 적용한 회귀모델(logreg_inv)은
+전체 모델에 유의성이 없었으며,
+
+후진선택제거법을 적용한 회귀모델(logreg_inv2)는 p-값 유의수준이 0.05보다
+낮은 값으로 전체적인 모델에 유의성이 있다는 결과가 나왔습니다.
+
+```{r}
+round(coef(logreg_inv),3)  
+round(exp(coef(logreg_inv)) ,3) # 독립변수가 1unit 증가할 떄 종속변수의 log-odds의 증가,감소값
+```
+
+Number.of.of.repeat.investors 제외하고,
+Number.of.Investors.in.Angel.and.or.VC변수와 Number.of.of.advisors변수는
+낮은 음의관계를 보여주었고, exp(coef(logreg_com))를 살펴보면 독립변수
+Number.of.of.repeat.investors의 수가 1unit이 증가할 떄, google rank가
+high라는 odds가 1.2배 증가했습니다.
+
+-   다음은 전체적인 모델의 유의성은 없지만 정확한 회귀모델의 성능을
+    평가해보았습니다.
+
+### 로지스틱 회귀모델의 성능평가
+
+```{r}
+ 
+library(Epi)  
+
+# 모든 독립변수에 대한 회귀모델 성능평가  
+graph_inv1 <- ROC(form = google.page.rank.of.company.website ~. , data= invest_info)
+
+#유의한 p-value값의 변수를 독립변수로 적용한 회귀모델 성능평가  
+graph_inv2 <- ROC(form = google.page.rank.of.company.website ~ Number.of.of.repeat.investors , data= invest_info)    
+
+ 
+#후진선택제거법을 적용한 회귀모델 성능평가  - 결과: graph_inv2에서 추가된 변수 없음  
+graph_data3 <- ROC(form = google.page.rank.of.company.website ~ Number.of.of.repeat.investors , data= invest_info)  
+
+```
+
++---------------+---------------+-----------------+-----------------+
+| Invest_info   | AUC( 회귀모델 | SENS (민감도)   | SPEC ( 특이도)  |
+|               | 성능평가지표) |                 |                 |
++===============+===============+=================+=================+
+| graph_inv1    | | 0.555       | | 19.6%         | | 90.3%         |
+|               |               |                 |                 |
+| 전체모델의    |               |                 |                 |
+| 유의성없음    |               |                 |                 |
+|               |               |                 |                 |
+| 모든 독립변수 |               |                 |                 |
++---------------+---------------+-----------------+-----------------+
+| graph_i n     | | 0.536       | | 21.3%         | | 89.5%         |
+| v2=graph_inv3 |               |                 |                 |
+|               |               |                 |                 |
+| 전체모델의    |               |                 |                 |
+| 유의성있음    |               |                 |                 |
+|               |               |                 |                 |
+| Num           |               |                 |                 |
+| ber.of.of.rep |               |                 |                 |
+| eat.investors |               |                 |                 |
++---------------+---------------+-----------------+-----------------+
+
+3개의 회귀모델을 비교분석한 결과 모든 독립변수를 적용한 graph_inv1\
+회귀모델의 AUC(모델 성능 평가지표)값이 가장 좋은 모델이었습니다. 그러나
+이 모델의 AUC는0.536로 0.6 미만의 값으로 모델성능이 좋지 않습니다.
+
+후진선택제거법을 통해 추가적인 변수를 선택하려고 했으나 분석결과 모델의
+성능을 개선시킬 수 있는 추가적인 변수는 존재하지 않았습니다.
+
+### 과거경험 데이터 프레임
+
+```{r}
+past_exp_info<-data.frame(Start_up_data[,c("Company_Name","Dependent.Company.Status","Worked.in.top.companies","Average.size.of.companies.worked.for.in.the.past","Have.been.part.of.startups.in.the.past.","Have.been.part.of.successful.startups.in.the.past.","Consulting.experience.","google.page.rank.of.company.website")])
+past_exp_info[[8]] <- as.numeric(past_exp_info[[8]])
+for (i in 2:7) {
+ past_exp_info[[i]] <- gsub("0", NA, past_exp_info[[i]])
+}
+detach(Start_up_data)
+str(past_exp_info) 
+```
+
+```{r}
+#####################로지스틱회귀- 과거경험 ######################
+colSums(is.na(past_exp_info))  
+
+
+#데이터 결측치 채우기  
+library(mice)
+m = 5
+str(past_exp_info)
+past_exp_info<-complete(mice(past_exp_info, m=m, maxit = 20, method = "pmm", seed=100, print=F))  
+colSums(is.na(past_exp_info))  
+
+
+# 데이터 열 정제하기  
+past_exp_info <-past_exp_info[ , -which(names(past_exp_info) %in% c("Company_Name","Dependent.Company.Status"))]
+str(past_exp_info)
+
+# 종속변수 high & low 이진변수 바꾸기  
+avg_rank <- median(past_exp_info$google.page.rank.of.company.website, na.rm=T)
+past_exp_info$google.page.rank.of.company.website<- ifelse(past_exp_info$google.page.rank.of.company.website >= avg_rank, 'high', 'low')  
+# chara 자료형 factor로 바꾸기  
+past_exp_info[sapply(past_exp_info, is.character)] <- lapply(past_exp_info[sapply(past_exp_info, is.character)], as.factor)
+
+#결측치 명목형 자료 처리하기  
+past_exp_info<- past_exp_info[complete.cases(past_exp_info),]
+
+
+```
+
+### 로지스틱 회귀분석
+
+종속변수: google.page.rank.of.company.website의 중요도의 중앙값 이상을
+'high', 미만을 'low'라는 이진변수
+
+```{r}
+# 전체 독립변수를 적용한 로지스틱 회귀모델
+logreg_past1 <- glm(google.page.rank.of.company.website ~ ., data= past_exp_info, family = binomial)   
+summary(logreg_past)  
+
+# 유의성 있는 1개의 독립변수만 적용한 회귀모델  
+logreg_past2 <- glm(google.page.rank.of.company.website ~ Have.been.part.of.successful.startups.in.the.past. , data= past_exp_info, family = binomial)  
+
+#유의성있는 독립변수 + 유의성에 가까운 변수 적용한 회귀모델  
+logreg_past3 <- glm(google.page.rank.of.company.website ~ Have.been.part.of.successful.startups.in.the.past.+ Worked.in.top.companies , data= past_exp_info, family = binomial)  
+
+```
+
+\< 분석결과\> 독립변수 중\
+Have.been.part.of.successful.startups.in.the.past에서 경험이 있는 Yes
+변수는 p-value값 0.05보다 낮은 수준으로, 종속변수인 Google page rank에
+유의미한 영향을 미치는것으로 분석되었습니다. Worked.in.top.companiesYes
+변수는 0.05 수준에 가까운 수치로 0.0644의 p-value값이 확인되었습니다.
+이외 나머지 독립변수들은 무의미한 영향을 미치는 것으로 분석되었고,
+Null모델의 오차는 605.11, residual 모델의 오차는 595.71로 만든 모델이
+오차를 줄였음을 알 수 있습니다.
+
+```{r}
+logregNull_past <- glm(google.page.rank.of.company.website ~ 1, family= binomial, data= past_exp_info)  
+summary(logregNull)  
+
+# Null 모델과 logreg_past 모델 유의성 비교    
+anova(logregNull_past, logreg_past1, test = 'Chisq') 
+
+# Null 모델과 logreg_past2 모델 유의성 비교
+anova(logregNull_past, logreg_past2, test = 'Chisq')  
+
+# Null 모델과 logreg_past3 모델 유의성 비교
+anova(logregNull_past, logreg_past3, test = 'Chisq') 
+
+```
+
+회귀모델 3개를 anova 테스트를 한 결과 logreg_past1과 2모델은 전체모델에
+유의성이\
+없었으며 logreg_past3 모델이 전체 모델에 유의성이 있음을 분석했습니다.
+
+```{r}
+round(coef(logreg_past1),3)  
+round(exp(coef(logreg_past1)) ,3) # 독립변수가 1unit 증가할 떄 종속변수의 log-odds의 증가,감소값
+```
+
+Have.been.part.of.successful.startups.in.the.past.Yes\
+(과거에 성공적인 스타트업의 일부였던 회사)일 수록 google.page.rank이
+낮아지는 음의관계를 보였고, Worked.in.top.companies(상위회사에 일했던
+경험)이 있을수록 google.page.rank가 높아지는 양의 관계를 보였습니다.
+
+exp(coef(logreg_past2))를 살펴보면 독립변수 1unit이 증가할 떄,\
+Have.been.part.of.successful.startups.in.the.past.Yes\
+(과거에 성공적인 스타트업의 일부였던 회사는 0.47배 감소,
+Worked.in.top.companies(상위회사에 일했던 경험)이 있을수록 1.6배
+증가하는 것을\
+알 수 있습니다.
+
+```{r}
+#로지스틱 회귀모델의 성능평가  
+library(Epi)  
+
+# 전체 모델에 유의성있는 logreg_past2모델 적용 회귀모델 성능평가
+graph_past1 <- ROC(form = google.page.rank.of.company.website ~ . , data= past_exp_info)
+
+# 유의성 있는 1개의 독립변수만 적용한 회귀모델 성능평가
+graph_past2 <- ROC(form = google.page.rank.of.company.website ~ Have.been.part.of.successful.startups.in.the.past., data= past_exp_info)    
+
+
+#유의성있는 독립변수 + 유의성에 가까운 변수 적용한 회귀모델 성능평가
+graph_past3 <- ROC(form = google.page.rank.of.company.website ~ Have.been.part.of.successful.startups.in.the.past.+ Worked.in.top.companies , data= past_exp_info)    
+
+
+
+```
+
++---------------+---------------+---------------+---------------+
+| past_exp_info | AUC( 회귀모델 | SENS (민감도) | SPEC (        |
+|               | 성능평가지표) |               | 특이도)       |
++===============+===============+===============+===============+
+| graph_past1   | | 0.582       | | 58%         | | 53.6%       |
+|               |               |               |               |
+| 전체 모델     |               |               |               |
+| 유의하지않음  |               |               |               |
++---------------+---------------+---------------+---------------+
+| graph_past2   | 0.540         | 47%           | 61%           |
+|               |               |               |               |
+| 전체모델      |               |               |               |
+| 유의하지 않음 |               |               |               |
+|               |               |               |               |
+| Have.been.p   |               |               |               |
+| art.of.succes |               |               |               |
+| sful.startups |               |               |               |
+| .in.the.past. |               |               |               |
++---------------+---------------+---------------+---------------+
+| graph_past3   | 0.566         | 58%           | 53.6%         |
+|               |               |               |               |
+| 전체모델      |               |               |               |
+| 유의함        |               |               |               |
+|               |               |               |               |
+| Have.been     |               |               |               |
+| .             |               |               |               |
+| part.of.succe |               |               |               |
+| s             |               |               |               |
+| sful.startups |               |               |               |
+| .             |               |               |               |
+| in.the.past.+ |               |               |               |
+| Worked.in     |               |               |               |
+| .             |               |               |               |
+| top.companies |               |               |               |
++---------------+---------------+---------------+---------------+
+
+전체 모델이 유의했던 graph_past3의 성능은 AUC지표로 보았을 때, 0.566의
+값으로 좋은 성능모델은 아닌것으로 분석되었습니다.

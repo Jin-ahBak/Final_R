@@ -1,0 +1,232 @@
+---
+title: "logi_naive"
+author: "박진아"
+date: '2021 6 13 '
+output: html_document
+---
+
+
+```{r}
+library('dplyr')
+library('tidyr')  
+library('tidyverse')
+```
+
+## 종속변수 만들기- 지역별 부캐관련 검색량
+```{r}
+cha<-read.csv('부캐 연관 검색어(1).csv')
+str(cha)
+cha['부캐관련검색량']<-cha[,2]+cha[,3]+cha[,4]+cha[,5]+cha[,6]
+cha<-cha[,c(-2,-3,-4,-5,-6)]
+str(cha)
+```
+
+## 독립변수 불러오기
+- 지역별 대한민국 행복지수(삶의 만족도)
+```{r}
+
+happy<-read.csv('대한민국행복지도_삶의만족도 (1).csv')
+str(happy)
+#install.packages('mice')
+library(mice)
+m=5
+happy<-complete(mice(happy, m=m, maxit = 20, method = "pmm", seed=100, print=F)) # 결측치 예상값으로 채우기기
+happy %>%  group_by(시도) %>%summarise('삶의만족도'=sum(삶의.만족도))
+region_happy1<- rename(region_happy1, "지역" = "시도")
+```
+
+- 지역별 여가활용 만족도
+```{r}
+play<-read.csv('대한민국행복지도_여가.csv')
+str(play)
+m=5
+play<-complete(mice(play, m=m, maxit = 20, method = "pmm", seed=100, print=F)) # 결측치 두개 예측치로 채우기
+region_play<-play%>% group_by(지역) %>%summarise('여가활용 만족도'=sum(여가활용.만족도.b.))
+```
+
+-지역별 자살률,1인가구,가족관계 만족도
+```{r}
+social<-read.csv('대한민국행복지도_관계 및 사회참여.csv')
+str(social)
+m=5
+social<-complete(mice(social, m=m, maxit = 20, method = "pmm", seed=100, print=F))
+social=social[,-2]
+region_social<-social%>%group_by(지역)%>%summarise_each(funs(sum))
+str(region_social)
+```
+
+- 학업성취도 비율 및 인구천명당 사설학원수
+```{r}
+education<-read.csv('대한민국행복지도_교육 (1).csv')
+m=5
+education<-complete(mice(education, m=m, maxit = 20, method = "pmm", seed=100, print=F))
+education=education[,-2]
+region_education<-education%>%group_by(지역)%>%summarise_each(funs(sum))
+str(region_education)
+```
+
+진아 start!
+
+### 데이터 프레임 합치기
+```{r}
+#install.packages("plyr")
+
+library(plyr)
+df1= join_all(list(cha,region_education, region_play,region_social,region_happy1), by="지역", type="inner")
+```
+
+### 분류모델을 위한 종속변수 변환
+```{r}
+# 부캐관련 검색량이 중앙값 36이상이면 1, 미만이며 0을 주었습니다.  
+str(df1)
+summary(df1) #부캐관련 검색량 평균 57.88
+df1$log_cha[df$`부캐관련검색량`<=36]<-0
+df1$log_cha[df$`부캐관련검색량`>=36]<-1
+ 
+df1$log_cha <- as.factor(df1$log_cha)
+
+```
+
+
+# 로지스틱 회귀모형 
+```{r}
+df1 <-df1[,-1]  
+str(df1)
+logreg <- glm(log_cha ~ ., data= df1, family = binomial)   
+summary(logreg)  
+ 
+# alias(logreg) #다중공선성에서 어떤 변수들이 관련있는지 한눈에 보기 위한 앨리어싱  
+backward = step(logreg)   #후진선택제거법으로 무의미한 변수 제거  
+formula(backward)  
+summary(backward)  
+
+Tel_data<- Tel_data[,c(2,5,8,9,12:16, 18:20)] # 후진선택 제거로 무의미한 변수를 제거한 새로운 데이터( 제거변수:gd, Pt,  Dd, PS, ML, IS, OS, PM)
+str(Tel_data)
+logreg2 <- glm(as.factor(Churn) ~ SeniorCitizen  + tenure  +
+    InternetService + OnlineSecurity + TechSupport + StreamingTV + 
+    StreamingMovies + Contract + PaperlessBilling  + 
+    MonthlyCharges + TotalCharges, data= Tel_data, family = binomial,control=glm.control(maxit=50))
+summary(logreg2)
+
+```
+
+logregNull <- glm(as.factor(Churn) ~ 1, family= binomial, data= Tel_data)  
+summary(logregNull)  
+anova(logregNull, logreg2, test = 'LRT')
+anova(logregNull, logreg2, test = 'Chisq')
+```
+
+anova 테스트를 한 결과 선형회귀 F값과 로지스틱 회귀 Chi-값 모두 P값이 유의수준 0.05보다  
+낮은 수준으로 유의성이 있다는 결과가 분석되었습니다. 
+
+```{r}
+coef(logreg2)  
+exp(coef(logreg2))  
+confint(logreg2)  
+exp(confint(logreg2))
+```
+
+
+로지스틱 회귀분석에서 가장 큰 증가는 InternetService가 Fiber optic였을 때, 이탈여부는 e1.30배 정도 증가하고, 
+다음으로는  streamingMovies 서비스와 streamingTV 서비스를 이용했던 경우 이탈이 날 odds가 e0.43배 그리고 e0.42배 증가한다.
+즉,exp(coef(logreg)) 를 보면  독립변수에 따라 이탈할 확률이 각각 3.68배, 1.5배, 1.5배 정도 증가한다는 것을 알 수 있다.  
+
+반대로 가장 큰 감소는 MonthlyCharges가 1단위 감소할 경우 이탈할 odds가 e-0.019배 , 즉 0.98배로감소한다.   
+다음으로는 tenure가 1단위 감소할 경우 이탈할 odds는  e-0.0597배, 즉 0.94배로exp(coef(logreg)) 를 보면  
+독립변수에 따라 이탈할 확률이 각각 0.98배, 0.94배로 감소한다는 것을 알 수 있다.   
+
+```{r}
+#로지스틱 회귀모델의 성능평가  
+library(Epi)  
+graph <- ROC(form = as.factor(Tel_data$Churn) ~ ., data= Tel_data)  
+head(graph$res)  
+tail(graph$res)  
+graph$res[round(graph$res$lr.eta,3)== 0.257 ,]  
+graph$AUC  
+graph$lr
+```
+
+Ir.eta = 0.274를 기준으로 분리했을 떄 분류가 최대로 좋아진다. sensitivity는 80.4%, 
+specificity 는 73.1%,  AUC는 0.845로 0.8 이상의 값으로 좋은 모델이라고 할 수 있다. 
+
+```{r}
+#로지스틱 회귀분석을 통해 예측치와 실측치 비교  
+data <-logreg2$data #관찰되는 독립, 종속변수값
+y <-logreg2$y   #관찰된 종속변수 실측치
+lp <- logreg2$linear.predictors  #z값
+head(cbind(ifelse(1/(1+exp(-lp)) > 0.257, 1,0), y)) #p값을 구해서 예측치와 실측치 구하기 
+table(ifelse(1/(1+exp(-lp)) > 0.257 , 1 ,0), y) # 예측치와 실측치 비교표
+```
+
+예측치와 실측치가 일치할 확률은 sensitivity 의 확률: 3686/3686+1477이고,   
+불일치할 확률은 sepcificity 의 확률: 1525/344+1525이다. 
+
+```{r}
+#나이브 베이즈 분류  
+str(Tel_data)  
+
+str(Tel_data)  
+table(Tel_data$Churn) 
+class(Tel_data$Churn)  
+str(Tel_data$Churn)  
+table(Tel_data$Churn)  
+length(Tel_data$Churn)
+
+ # 훈련 데이터 만들기  5274는 length(Tel_data2$Churn)*3/4의 값으로 훈련데이터는 전체데이터의 3/4 
+set.seed(10)
+n = nrow(Tel_data)  
+i = 1:n  
+train_list= sample(i , n*0.75)  
+test_list= setdiff(i, train_list)  
+train= Tel_data[train_list,-ncol(Tel_data)] # 훈련 집합 추출 75%
+test = Tel_data[test_list, -ncol(Tel_data)]  
+train_labels= Tel_data[train_list,ncol(Tel_data)] # 훈련 데이터들 중 종속변수인 지난달 이탈여부에 대한 열만 존재
+test_labels = Tel_data[test_list,ncol(Tel_data)] #테스트 데이터들 중 종속변수인 지난달 이탈여부에 대한 열만 존재  
+
+
+
+prop.table(table(train_labels))  
+prop.table(table(test_labels))
+```
+
+나이브 베이즈 분류를 통해  각 독립변수를 전제로  종속변수인 지난 달 이탈 여부의 확률을 알 수 있다.    
+다음과 같이 훈련 데이터와 테스트 데이터가 랜덤 샘플링되어   
+지난 달 이탈여부에 대한 test_labels 데이터와 train_labels 데이터   
+의 yes, no 확률이 비슷하게 도출되어 결과가 잘 나왔음을 알 수 있다.  
+
+
+```{r}
+# 모델/분류기 생성
+library(e1071)
+Tel_data_classifier <- naiveBayes(train, train_labels, laplace = 1) #모델 성능 개선: 라플라스 추정량 사용  
+# test 데이터 예측
+Test_pred <- predict(Tel_data_classifier, test)  
+table(Test_pred)
+# CrossTable 확인 및 정답률 확인
+library(gmodels)
+CrossTable(Test_pred, test_labels, prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE,
+           dnn = c('predicted', 'actual'))
+```
+ 
+실측치에서 지난 이탈 여부에 No인데 예측치 또한 No인 것의 개수는 902개 정도로 약 51% 비율로 정확하며
+실측치에서 Yes인데 예측치 또한 Yes인 것의 개수는 390개 정도로 대략 22%의 확률을 보여준다.  
+
+
+```{r}
+library(caret)  
+confusionMatrix(as.factor(Test_pred), 
+                as.factor(test_labels),
+                positive = "Yes")
+print(sum(Test_pred==test_labels)*100/length(Test_pred))
+
+```
+  
+정확도는 대략 73.5%로 아무런 정보가 없을 떄 72.07%의 비율보다 조금높은 정확도를 보였습니다.  
+sensitivity (no인데 no로 맞출 확률):  약 80%
+specificity (yes 인데 yes로 맞출확률) : 약 70%  
+
+따라서, 모델 성능 평가 정확도 약 73%  
+
+
+
+

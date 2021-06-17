@@ -62,7 +62,6 @@ library(plyr)
 df= join_all(list(cha,region_education, region_play,region_social,region_happy1), by="지역", type="inner")
 ```
 
-<<<<<<< HEAD
 
 
 
@@ -70,15 +69,12 @@ df= join_all(list(cha,region_education, region_play,region_social,region_happy1)
 ```{r}
 #1.지역 제외 
 rdf <- df[,-1]
-  
-rdf
+str(rdf)
 #변수 간 상관관계 산점행렬도로 나타내기 
 library(psych)
 pairs.panels(rdf)
 ```
 
-
-rdf
 ```{r}
 #2.회귀분석 
 reg1 <- lm(부캐관련검색량 ~.,data=rdf)
@@ -90,21 +86,15 @@ plot_model(reg1,type="diag")
 library(lmtest)
 dwtest(reg1)
 
-#후진제거법 
-reg_back <- step(reg1, direction = 'backward', trace=T)
-summary(reg_back)
+
 
 #전진 선택법 
 reg_for <- lm(부캐관련검색량~1, rdf)
 summary(reg_for)
-reg_for <- step(reg_for, direction = 'forward', scope=(부캐관련검색량 ~학업성취도 + 인구.천명당.사설학원수 + `여가활용 만족도` + 
-    인구.십만명당.자살률.a. + X1인가구.독거노인.제외..비율.a. + 
-    가족관계.만족도.b. + `삶의 만족도`),trace=T)
-
-
-#선택 제거법
-reg_c <- step(reg1,direction = "both")
-summary(reg_c)
+reg_for2 <- step(reg_for, scope=list(lower= reg_for,upper = reg1), direction = 'forward')
+# 전진 선택에서 사설학원수 독립변수 제거한 lm  
+reg_for3 <- lm(부캐관련검색량~ 인구.십만명당.자살률.a. + X1인가구.독거노인.제외..비율.a.+ `여가활용 만족도`+ `삶의 만족도`, data= rdf)
+vif(reg_for3)
 
 
 #check
@@ -117,7 +107,7 @@ lm.beta(reg_for)
 #4.
 
 ```{r}
-
+shapiro.test(rdf$부캐관련검색량) #정규성검정
 #잔차의 정규성 검정
 shapiro.test(reg_for$residuals)
 #잔차 정규성 만족 - pvalue가 0.05보다 크므로 
@@ -128,7 +118,7 @@ shapiro.test(reg_for$residuals)
 
 #.다중공선성 진단 
 library(car)
-vif(reg_for)
+vif(reg_for2)
 
 ```
 
@@ -136,16 +126,4 @@ vif(reg_for)
 
 
 
-=======
->>>>>>> f87d6daa22a4ba8d6f55e5c56236d80d6a0cdbd4
-### 분류모델을 위한 종속변수 변환
-```{r}
-summary(df) 
-```
-- 부캐관련 검색량 평균 57.88
-```{r}
-df$log_cha[df$`부캐관련검색량`<=36]<-0
-df$log_cha[df$`부캐관련검색량`>=36]<-1
-
-```
 
